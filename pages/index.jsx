@@ -53,18 +53,8 @@ function verdictClass(verdict) {
   return 'verdict-improve';
 }
 
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      const base64 = String(result).split(',')[1] || '';
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
+// 巨大なBase64文字列をJSONに埋め込んで送ると、デプロイナウのWAFに誤検知でブロックされることがあるため、
+// 音声ファイルはmultipart/form-data形式でバイナリのまま直接送信する
 
 export default function Home() {
   const [taskName, setTaskName] = useState(TASKS[0]);
@@ -109,13 +99,13 @@ export default function Home() {
     setResult(null);
 
     try {
-      const audioBase64 = await fileToBase64(audioFile);
-      const mimeType = audioFile.type || 'audio/mpeg';
+      const formData = new FormData();
+      formData.append('taskName', taskName);
+      formData.append('audio', audioFile);
 
       const res = await fetch('/api/gemini', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskName, audioBase64, mimeType }),
+        body: formData,
       });
 
       const data = await res.json();
