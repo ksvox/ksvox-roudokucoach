@@ -1,9 +1,30 @@
 // pages/api/gemini.js
 // 朗読AIコーチ - Gemini API呼び出し用サーバーサイドAPIルート
-// 生徒の朗読音声(Base64)をGeminiに直接渡し、見本音声の分析データ・朗読メソッドと照合して評価する
+// 生徒の朗読音声(multipart/form-data)をGeminiに直接渡し、見本音声の分析データ・朗読メソッドと照合して評価する
 
 import fs from 'fs';
 import path from 'path';
+import { IncomingForm } from 'formidable';
+
+// multipart/form-dataを扱うため、Next.js標準のbodyParserは無効化する(formidableが直接ストリームを読む)
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
+function parseForm(req) {
+  return new Promise((resolve, reject) => {
+    const form = new IncomingForm({ maxFileSize: 20 * 1024 * 1024 });
+    form.parse(req, (err, fields, files) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve({ fields, files });
+    });
+  });
+}
 
 function loadText(fileName) {
   return fs.readFileSync(path.join(process.cwd(), 'data', fileName), 'utf-8');
@@ -145,9 +166,22 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { taskName, audioBase64, mimeType } = req.body || {};
+  let fields;
+  let files;
+  try {
+    ({ fields, files } = await parseForm(req));
+  } catch (e) {
+    res.status(400).json({
+      error: 'アップロードの読み取りに失敗しました。ファイルサイズをご確認ください。',
+      debugDetail: String(e && e.message ? e.message : e),
+    });
+    return;
+  }
 
-  if (!taskName || !audioBase64) {
+  const taskName = Array.isArray(fields.taskName) ? fields.taskName[0] : fields.taskName;
+  const audioFileEntry = Array.isArray(files.audio) ? files.audio[0] : files.audio;
+
+  if (!taskName || !audioFileEntry) {
     res.status(400).json({ error: '課題名または音声データが指定されていません。' });
     return;
   }
@@ -161,6 +195,10 @@ export default async function handler(req, res) {
   const model = 'gemini-3.5-flash';
 
   try {
+    const audioBuffer = fs.readFileSync(audioFileEntry.filepath);
+    const audioBase64 = audioBuffer.toString('base64');
+    const mimeType = audioFileEntry.mimetype || 'audio/mpeg';
+
     const methodText = loadText('method.txt');
     const rawSampleData = loadText('sample-analysis.txt');
     const sampleAnalysis = extractSampleAnalysis(rawSampleData, taskName);
