@@ -103,7 +103,9 @@ export default function Home() {
       formData.append('taskName', taskName);
       formData.append('audio', audioFile);
 
-      const res = await fetch('/api/gemini', {
+      // デプロイナウのWAFが音声を含む大きめのリクエストをブロックしてしまうため、
+      // 音声の送信・Gemini呼び出しはCloudflare Workers側で行う
+      const res = await fetch('https://roudokucoach.ksvox-nobu.workers.dev', {
         method: 'POST',
         body: formData,
       });
