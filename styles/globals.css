@@ -1,0 +1,102 @@
+:root {
+  --color-ai-indigo: #121a2d;
+  --color-ai-indigo-light: #1c2842;
+  --color-fuji: #cec4d8;
+  --color-beni: #d6174b;
+  --color-gold: #d4af37;
+}
+
+body {
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+  background-color: var(--color-ai-indigo);
+  color: #f1f5f9;
+  background-image: radial-gradient(circle at 50% 50%, rgba(206, 196, 216, 0.04) 2px, transparent 2px);
+  background-size: 28px 28px;
+}
+
+.mincho-font {
+  font-family: 'Shippori Mincho', serif;
+}
+
+.text-fuji { color: var(--color-fuji); }
+.bg-fuji { background-color: var(--color-fuji); }
+.border-fuji { border-color: var(--color-fuji); }
+
+.text-beni { color: var(--color-beni); }
+.bg-beni { background-color: var(--color-beni); }
+.border-beni { border-color: var(--color-beni); }
+
+/* 大正モダンカード */
+.roman-card {
+  background: linear-gradient(145deg, rgba(28, 40, 66, 0.95), rgba(18, 26, 45, 0.98));
+  border: 1px solid rgba(206, 196, 216, 0.25);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), inset 0 0 15px rgba(206, 196, 216, 0.05);
+  position: relative;
+}
+
+/* ヘッダー専用: ロゴの背景色(黒)とアプリの背景色を完全に一致させるための黒背景パネル */
+.roman-card-header-black {
+  background-color: #000000;
+  border: 1px solid rgba(206, 196, 216, 0.25);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  position: relative;
+}
+
+.beni-btn {
+  background: linear-gradient(135deg, #e62055 0%, #a80c36 100%);
+  border: 1px solid #ff7b9c;
+  box-shadow: 0 4px 15px rgba(214, 23, 75, 0.4);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+.beni-btn:hover {
+  background: linear-gradient(135deg, #f72c62 0%, #bd113e 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(214, 23, 75, 0.6);
+}
+.beni-btn:active {
+  transform: translateY(1px);
+}
+.beni-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.washi-bg {
+  background-color: #fcfbfa;
+  background-image: radial-gradient(rgba(0, 0, 0, 0.02) 1px, transparent 0),
+    linear-gradient(to right, rgba(214, 23, 75, 0.03) 1px, transparent 1px);
+  background-size: 20px 20px, 100% 28px;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(18, 26, 45, 0.6);
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(206, 196, 216, 0.4);
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(214, 23, 75, 0.7);
+}
+
+/* 評価バッジ */
+.verdict-clear {
+  background-color: #dcfce7;
+  color: #166534;
+  border-color: #86efac;
+}
+.verdict-almost {
+  background-color: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+.verdict-improve {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
