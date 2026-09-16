@@ -5,30 +5,6 @@
 import fs from 'fs';
 import path from 'path';
 
-// Next.jsのbodyParser設定(sizeLimit)がデプロイ環境によって効かないケースがあるため、
-// 標準のbodyParserを無効化し、自前でリクエストボディを読み取る確実な方式にする
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
-function readRequestBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on('data', (chunk) => chunks.push(chunk));
-    req.on('end', () => {
-      try {
-        const raw = Buffer.concat(chunks).toString('utf-8');
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch (e) {
-        reject(e);
-      }
-    });
-    req.on('error', reject);
-  });
-}
-
 function loadText(fileName) {
   return fs.readFileSync(path.join(process.cwd(), 'data', fileName), 'utf-8');
 }
@@ -169,15 +145,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  let body;
-  try {
-    body = await readRequestBody(req);
-  } catch (e) {
-    res.status(400).json({ error: 'リクエストの読み取りに失敗しました。', debugDetail: String(e && e.message ? e.message : e) });
-    return;
-  }
-
-  const { taskName, audioBase64, mimeType } = body || {};
+  const { taskName, audioBase64, mimeType } = req.body || {};
 
   if (!taskName || !audioBase64) {
     res.status(400).json({ error: '課題名または音声データが指定されていません。' });
