@@ -136,7 +136,8 @@ export default function Home() {
       }, 100);
     } catch (err) {
       console.error(err);
-      setErrorMsg('通信エラーが発生しました。もう一度お試しください。');
+      const detail = err && err.message ? String(err.message) : String(err);
+      setErrorMsg(`通信エラーが発生しました。もう一度お試しください。\n[詳細] ${detail}`);
       setLoading(false);
     }
   };
@@ -148,7 +149,7 @@ export default function Home() {
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       </Head>
 
-      <div className="w-full max-w-2xl px-4 pt-6 space-y-7">
+      <div className="w-full max-w-2xl mx-auto px-4 pt-6 space-y-7">
         {/* 1. ヘッダー */}
         <header className="roman-card rounded-2xl p-6 text-center overflow-hidden relative border border-slate-700 shadow-2xl">
           <div className="absolute inset-0 pointer-events-none opacity-[0.08] mix-blend-screen">

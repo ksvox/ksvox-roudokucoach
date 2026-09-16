@@ -12,7 +12,7 @@ export default function Document() {
           rel="stylesheet"
         />
       </Head>
-      <body className="min-h-screen pb-16 flex flex-col items-center antialiased">
+      <body className="min-h-screen pb-16 antialiased">
         <Main />
         <NextScript />
       </body>
