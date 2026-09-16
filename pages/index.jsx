@@ -121,7 +121,9 @@ export default function Home() {
       const data = await res.json();
 
       if (!res.ok) {
-        setErrorMsg(data?.error || '診断中にエラーが発生しました。もう一度お試しください。');
+        const baseMsg = data?.error || '診断中にエラーが発生しました。もう一度お試しください。';
+        const detail = data?.debugDetail ? `\n[詳細] ${data.debugDetail}` : '';
+        setErrorMsg(baseMsg + detail);
         setLoading(false);
         return;
       }
@@ -148,7 +150,7 @@ export default function Home() {
 
       <div className="w-full max-w-2xl px-4 pt-6 space-y-7">
         {/* 1. ヘッダー */}
-        <header className="roman-card-header-black rounded-2xl p-6 text-center overflow-hidden relative border border-slate-700 shadow-2xl">
+        <header className="roman-card rounded-2xl p-6 text-center overflow-hidden relative border border-slate-700 shadow-2xl">
           <div className="absolute inset-0 pointer-events-none opacity-[0.08] mix-blend-screen">
             <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
               <defs>
@@ -185,8 +187,8 @@ export default function Home() {
             </div>
 
             <div className="flex items-center justify-center space-x-3 pt-1">
-              <div className="w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center flex-shrink-0">
-                <img src="/logo.png" alt="朗読AIコーチ Logo" className="w-full h-full object-contain" />
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-slate-900 to-indigo-950 border-2 border-fuji p-2 shadow-lg flex items-center justify-center flex-shrink-0">
+                <img src="/logo.png" alt="朗読AIコーチ Logo" className="w-full h-full object-contain rounded-lg" />
               </div>
 
               <h1 className="mincho-font text-2xl sm:text-4xl font-extrabold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-slate-100 via-fuji to-amber-200">
@@ -296,7 +298,9 @@ export default function Home() {
               </div>
             </div>
 
-            {errorMsg && <p className="text-xs font-bold text-rose-400">{errorMsg}</p>}
+            {errorMsg && (
+              <p className="text-xs font-bold text-rose-400 whitespace-pre-wrap break-words">{errorMsg}</p>
+            )}
 
             <div className="pt-2">
               <button
