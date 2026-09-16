@@ -63,6 +63,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [result, setResult] = useState(null);
+  const [evaluatedAt, setEvaluatedAt] = useState(null);
   const fileInputRef = useRef(null);
   const outputRef = useRef(null);
 
@@ -78,6 +79,66 @@ export default function Home() {
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       setAudioFile(e.dataTransfer.files[0]);
     }
+  };
+
+  const handleSaveTxt = () => {
+    if (!result) return;
+
+    const dateStr = (evaluatedAt || new Date()).toLocaleString('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    let fileText = `========================================
+ 朗読AIコーチ - 診断結果レポート
+ 提供：ボーカル道場K's VOX
+========================================
+■ 診断日時: ${dateStr}
+■ 朗読課題: ${taskName}
+
+----------------------------------------
+AIが解析したタイムスタンプ（検証用）
+----------------------------------------
+${(result.timestamps || []).join('\n')}
+
+----------------------------------------
+1. 総評
+----------------------------------------
+${result.overallReview || ''}
+
+----------------------------------------
+2. 4つのルールの診断結果
+----------------------------------------
+`;
+
+    (result.rules || []).forEach((rule) => {
+      fileText += `・${rule.name}：[${rule.verdict}]\n${rule.comment}\n\n`;
+    });
+
+    fileText += `----------------------------------------
+3. 次へのステップ・一言アドバイス
+----------------------------------------
+${result.finalAdvice || ''}
+
+========================================
+門弟制ボーカルスクール K's VOX
+https://www.ksvox.net/
+========================================`;
+
+    const blob = new Blob([fileText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const sanitizedTask = (taskName || 'Task').replace(/[/\\?%*:|"<>]/g, '_');
+    const dateForFileName = (evaluatedAt || new Date()).toISOString().slice(0, 10);
+    a.download = `KsVOX_RoudokuCoach_${sanitizedTask}_${dateForFileName}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const handleSubmit = async (e) => {
@@ -121,6 +182,7 @@ export default function Home() {
       }
 
       setResult(data);
+      setEvaluatedAt(new Date());
       setLoading(false);
 
       setTimeout(() => {
@@ -409,6 +471,16 @@ export default function Home() {
                     3. 次へのステップ・一言アドバイス
                   </h4>
                   <p className="text-sm leading-relaxed text-slate-800 font-semibold mincho-font">{result.finalAdvice}</p>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveTxt}
+                    className="w-full py-3 px-4 rounded-xl font-bold text-slate-700 bg-slate-200 hover:bg-slate-300 border border-slate-300 transition shadow-sm flex items-center justify-center gap-2 text-sm mincho-font"
+                  >
+                    診断結果をテキストで保存
+                  </button>
                 </div>
               </div>
             )}
