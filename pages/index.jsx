@@ -65,6 +65,7 @@ export default function Home() {
   const [result, setResult] = useState(null);
   const [evaluatedAt, setEvaluatedAt] = useState(null);
   const fileInputRef = useRef(null);
+  const recordInputRef = useRef(null);
   const outputRef = useRef(null);
 
   const handleFileChange = (e) => {
@@ -306,7 +307,7 @@ https://www.ksvox.net/
             <div className="space-y-2">
               <label className="block text-xs sm:text-sm font-semibold text-fuji flex items-center space-x-2">
                 <span className="w-2 h-2 rounded-full bg-beni inline-block"></span>
-                <span>② 音声データ入力 (MP3)</span>
+                <span>② 音声データ入力</span>
               </label>
 
               <div
@@ -351,6 +352,31 @@ https://www.ksvox.net/
                   </div>
                 )}
               </div>
+
+              {/* その場で録音するボタン(スマホではマイクの録音アプリが直接開く) */}
+              <input
+                ref={recordInputRef}
+                type="file"
+                accept="audio/*"
+                capture
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              <button
+                type="button"
+                onClick={() => recordInputRef.current?.click()}
+                className="w-full py-2.5 rounded-xl border border-fuji/40 bg-indigo-950/60 hover:bg-indigo-900/70 text-fuji text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
+                  ></path>
+                </svg>
+                <span>今すぐ録音する（スマホのみ）</span>
+              </button>
             </div>
 
             {errorMsg && (
