@@ -141,26 +141,28 @@ export default function Home() {
   const [result, setResult] = useState(null);
   const [evaluatedAt, setEvaluatedAt] = useState(null);
   const fileInputRef = useRef(null);
-  const recordInputRef = useRef(null);
   const outputRef = useRef(null);
 
   // ===== アプリ内録音用 =====
-  // recState: 'idle'(未録音) / 'recording'(録音中) / 'processing'(変換中) / 'recorded'(録音済み)
+  // recState:
+  //  'idle'(未録音) / 'ready'(マイク準備完了・開始待ち) / 'countdown'(3・2・1) /
+  //  'recording'(録音中) / 'processing'(変換中) / 'recorded'(録音済み)
   const [recState, setRecState] = useState('idle');
   const [recSeconds, setRecSeconds] = useState(0);
+  const [countdown, setCountdown] = useState(0);
   const [recordedUrl, setRecordedUrl] = useState('');
   const [showPlayer, setShowPlayer] = useState(false);
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
   const chunksRef = useRef([]);
   const timerRef = useRef(null);
+  const countdownRef = useRef(null);
+  const recordedUrlRef = useRef('');
 
-  const clearRecordedAudio = () => {
-    if (recordedUrl) URL.revokeObjectURL(recordedUrl);
-    setRecordedUrl('');
-    setShowPlayer(false);
-    setRecState('idle');
-    setRecSeconds(0);
+  const setPlaybackUrl = (url) => {
+    if (recordedUrlRef.current) URL.revokeObjectURL(recordedUrlRef.current);
+    recordedUrlRef.current = url;
+    setRecordedUrl(url);
   };
 
   const stopStream = () => {
@@ -172,18 +174,39 @@ export default function Home() {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+  };
+
+  // 録音関係をすべてリセットする(ファイルを選び直したときなど)
+  const clearRecordedAudio = () => {
+    const rec = mediaRecorderRef.current;
+    if (rec && rec.state === 'recording') {
+      rec.onstop = null;
+      rec.stop();
+    }
+    mediaRecorderRef.current = null;
+    stopStream();
+    setPlaybackUrl('');
+    setShowPlayer(false);
+    setRecState('idle');
+    setRecSeconds(0);
+    setCountdown(0);
   };
 
   // ページを離れるときにマイクと一時データを片付ける
   useEffect(() => {
     return () => {
       stopStream();
-      if (recordedUrl) URL.revokeObjectURL(recordedUrl);
+      if (recordedUrlRef.current) URL.revokeObjectURL(recordedUrlRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleStartRecording = async () => {
+  // ステップ1：マイクの許可を取り、録音の準備だけする(まだ録音は始めない)
+  const handlePrepareRecording = async () => {
     setErrorMsg('');
 
     if (typeof window === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
@@ -193,7 +216,14 @@ export default function Home() {
 
     let stream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // ブラウザの通話向け自動加工(エコー除去・ノイズ除去・音量自動調整)をオフにして、素の声を録る
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      });
     } catch (err) {
       console.error(err);
       setErrorMsg('マイクを使用できませんでした。ブラウザの設定でマイクの使用を許可してから、もう一度お試しください。');
@@ -201,14 +231,26 @@ export default function Home() {
     }
 
     // 前回の録音があれば破棄
-    if (recordedUrl) URL.revokeObjectURL(recordedUrl);
-    setRecordedUrl('');
+    stopStream();
+    setPlaybackUrl('');
     setShowPlayer(false);
     setAudioFile(null);
+    setRecSeconds(0);
 
     mediaStreamRef.current = stream;
-    chunksRef.current = [];
+    setRecState('ready');
+  };
 
+  // ステップ3：実際に録音を開始する
+  const beginRecording = () => {
+    const stream = mediaStreamRef.current;
+    if (!stream) {
+      setRecState('idle');
+      setErrorMsg('マイクの準備が切れました。もう一度「アプリ内で録音する」を押してください。');
+      return;
+    }
+
+    chunksRef.current = [];
     const mimeType = pickRecorderMimeType();
     let recorder;
     try {
@@ -216,6 +258,7 @@ export default function Home() {
     } catch (err) {
       console.error(err);
       stopStream();
+      setRecState('idle');
       setErrorMsg('録音を開始できませんでした。もう一度お試しください。');
       return;
     }
@@ -230,19 +273,21 @@ export default function Home() {
       const rawType = (recorder.mimeType || mimeType || 'audio/webm').split(';')[0];
       const rawBlob = new Blob(chunksRef.current, { type: rawType });
 
-      let finalBlob = rawBlob;
+      // 確認用の再生には、変換前の高音質な録音をそのまま使う
+      setPlaybackUrl(URL.createObjectURL(rawBlob));
+
+      // Geminiへの送信用は、確実に読めるWAV(16kHz・モノラル)に変換する
+      let sendBlob = rawBlob;
       let fileName = `アプリ内録音.${rawType.includes('mp4') ? 'm4a' : rawType.split('/')[1] || 'webm'}`;
       try {
-        finalBlob = await convertToWav(rawBlob);
+        sendBlob = await convertToWav(rawBlob);
         fileName = 'アプリ内録音.wav';
       } catch (err) {
         // 変換に失敗した場合は、録音したままの形式で送る
         console.error('WAV変換に失敗しました:', err);
       }
 
-      const file = new File([finalBlob], fileName, { type: finalBlob.type });
-      setAudioFile(file);
-      setRecordedUrl(URL.createObjectURL(finalBlob));
+      setAudioFile(new File([sendBlob], fileName, { type: sendBlob.type }));
       setRecState('recorded');
     };
 
@@ -262,6 +307,25 @@ export default function Home() {
     }, 1000);
   };
 
+  // ステップ2：「録音を開始する」→ 3・2・1のカウントダウン後に録音開始
+  const handleStartCountdown = () => {
+    setErrorMsg('');
+    setCountdown(3);
+    setRecState('countdown');
+    let remaining = 3;
+    countdownRef.current = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+        setCountdown(0);
+        beginRecording();
+      } else {
+        setCountdown(remaining);
+      }
+    }, 1000);
+  };
+
   const handleStopRecording = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
@@ -269,10 +333,12 @@ export default function Home() {
   };
 
   const handleRecordButton = () => {
-    if (recState === 'recording') {
+    if (recState === 'idle' || recState === 'recorded') {
+      handlePrepareRecording();
+    } else if (recState === 'ready') {
+      handleStartCountdown();
+    } else if (recState === 'recording') {
       handleStopRecording();
-    } else if (recState !== 'processing') {
-      handleStartRecording();
     }
   };
 
@@ -356,7 +422,7 @@ https://www.ksvox.net/
     e.preventDefault();
     setErrorMsg('');
 
-    if (recState === 'recording') {
+    if (recState === 'recording' || recState === 'countdown') {
       setErrorMsg('録音中です。「録音を停止する」ボタンを押してから評価・分析を実行してください。');
       return;
     }
@@ -397,6 +463,13 @@ https://www.ksvox.net/
         const baseMsg = data?.error || '診断中にエラーが発生しました。もう一度お試しください。';
         const detail = data?.debugDetail ? `\n[詳細] ${data.debugDetail}` : '';
         setErrorMsg(baseMsg + detail);
+        setLoading(false);
+        return;
+      }
+
+      // 選択した課題とまったく異なる文章を読んでいた場合
+      if (data?.taskMismatch) {
+        setErrorMsg('選択した課題と異なる音声のようです。選択した朗読課題の音声を録音してください。');
         setLoading(false);
         return;
       }
@@ -572,46 +645,37 @@ https://www.ksvox.net/
                 )}
               </div>
 
-              {/* その場で録音するボタン(スマホではマイクの録音アプリが直接開く) */}
-              <input
-                ref={recordInputRef}
-                type="file"
-                accept="audio/*"
-                capture
-                className="hidden"
-                onChange={handleFileChange}
-              />
-              <button
-                type="button"
-                onClick={() => recordInputRef.current?.click()}
-                className="w-full py-2.5 rounded-xl border border-fuji/40 bg-indigo-950/60 hover:bg-indigo-900/70 text-fuji text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
-                  ></path>
-                </svg>
-                <span>今すぐ録音する（スマホのみ）</span>
-              </button>
-
               {/* アプリ内録音ボタン(MediaRecorder方式。iPhone・Android・PC共通) */}
               <button
                 type="button"
                 onClick={handleRecordButton}
-                disabled={loading || recState === 'processing'}
-                className={`w-full py-2.5 px-3 rounded-xl border text-xs sm:text-sm font-bold flex flex-col items-center justify-center transition disabled:opacity-60 disabled:cursor-not-allowed ${
-                  recState === 'recording'
+                disabled={loading || recState === 'processing' || recState === 'countdown'}
+                className={`w-full py-2.5 px-3 rounded-xl border text-xs sm:text-sm font-bold flex flex-col items-center justify-center transition disabled:cursor-not-allowed ${
+                  recState === 'recording' || recState === 'countdown'
                     ? 'border-rose-400 bg-rose-950/70 hover:bg-rose-900/70 text-rose-200'
-                    : 'border-fuji/40 bg-indigo-950/60 hover:bg-indigo-900/70 text-fuji'
+                    : recState === 'ready'
+                    ? 'border-amber-300/70 bg-amber-950/50 hover:bg-amber-900/60 text-amber-200'
+                    : 'border-fuji/40 bg-indigo-950/60 hover:bg-indigo-900/70 text-fuji disabled:opacity-60'
                 }`}
               >
                 {recState === 'idle' && (
                   <>
                     <span>🎤 アプリ内で録音する</span>
                     <span className="text-[10px] font-normal opacity-80 mt-0.5">※マイクの使用を許可してください</span>
+                  </>
+                )}
+                {recState === 'ready' && (
+                  <>
+                    <span>⏺ 録音を開始する</span>
+                    <span className="text-[10px] font-normal opacity-80 mt-0.5">
+                      ※準備ができたら押してください（3秒のカウントダウン後に録音が始まります）
+                    </span>
+                  </>
+                )}
+                {recState === 'countdown' && (
+                  <>
+                    <span className="text-2xl leading-none mincho-font">{countdown}</span>
+                    <span className="text-[10px] font-normal opacity-80 mt-1">呼吸を整えて…</span>
                   </>
                 )}
                 {recState === 'recording' && (
