@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Head from 'next/head';
 
 const TASKS = [
@@ -53,6 +53,82 @@ function verdictClass(verdict) {
   return 'verdict-improve';
 }
 
+// ===== アプリ内録音(MediaRecorder)用の補助関数 =====
+
+// 録音の上限時間(秒)。WAV(16kHz・モノラル)で約19MBとなり、20MB制限に収まる長さ
+const MAX_RECORD_SECONDS = 600;
+
+// ブラウザが対応している録音形式を選ぶ(iPhoneはmp4、Androidはwebmになることが多い)
+function pickRecorderMimeType() {
+  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
+  const candidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
+  for (const type of candidates) {
+    if (MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return '';
+}
+
+function formatSeconds(sec) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// 録音データを、Geminiが確実に読めるWAV(16kHz・モノラル)に変換する
+async function convertToWav(blob) {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!AudioCtx || !OfflineCtx) throw new Error('AudioContext not supported');
+
+  const arrayBuffer = await blob.arrayBuffer();
+  const ctx = new AudioCtx();
+  let decoded;
+  try {
+    decoded = await new Promise((resolve, reject) => {
+      const p = ctx.decodeAudioData(arrayBuffer, resolve, reject);
+      if (p && typeof p.then === 'function') p.then(resolve, reject);
+    });
+  } finally {
+    if (ctx.close) ctx.close();
+  }
+
+  const targetRate = 16000;
+  const length = Math.max(1, Math.ceil(decoded.duration * targetRate));
+  const offline = new OfflineCtx(1, length, targetRate);
+  const source = offline.createBufferSource();
+  source.buffer = decoded;
+  source.connect(offline.destination);
+  source.start(0);
+  const rendered = await offline.startRendering();
+  const samples = rendered.getChannelData(0);
+
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const writeStr = (offset, str) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, targetRate, true);
+  view.setUint32(28, targetRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    offset += 2;
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
 // 巨大なBase64文字列をJSONに埋め込んで送ると、デプロイナウのWAFに誤検知でブロックされることがあるため、
 // 音声ファイルはmultipart/form-data形式でバイナリのまま直接送信する
 
@@ -68,8 +144,141 @@ export default function Home() {
   const recordInputRef = useRef(null);
   const outputRef = useRef(null);
 
+  // ===== アプリ内録音用 =====
+  // recState: 'idle'(未録音) / 'recording'(録音中) / 'processing'(変換中) / 'recorded'(録音済み)
+  const [recState, setRecState] = useState('idle');
+  const [recSeconds, setRecSeconds] = useState(0);
+  const [recordedUrl, setRecordedUrl] = useState('');
+  const [showPlayer, setShowPlayer] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const mediaStreamRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
+
+  const clearRecordedAudio = () => {
+    if (recordedUrl) URL.revokeObjectURL(recordedUrl);
+    setRecordedUrl('');
+    setShowPlayer(false);
+    setRecState('idle');
+    setRecSeconds(0);
+  };
+
+  const stopStream = () => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  // ページを離れるときにマイクと一時データを片付ける
+  useEffect(() => {
+    return () => {
+      stopStream();
+      if (recordedUrl) URL.revokeObjectURL(recordedUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleStartRecording = async () => {
+    setErrorMsg('');
+
+    if (typeof window === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setErrorMsg('お使いのブラウザはアプリ内録音に対応していません。ブラウザを最新版にするか、音声ファイルを選択してください。');
+      return;
+    }
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      console.error(err);
+      setErrorMsg('マイクを使用できませんでした。ブラウザの設定でマイクの使用を許可してから、もう一度お試しください。');
+      return;
+    }
+
+    // 前回の録音があれば破棄
+    if (recordedUrl) URL.revokeObjectURL(recordedUrl);
+    setRecordedUrl('');
+    setShowPlayer(false);
+    setAudioFile(null);
+
+    mediaStreamRef.current = stream;
+    chunksRef.current = [];
+
+    const mimeType = pickRecorderMimeType();
+    let recorder;
+    try {
+      recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    } catch (err) {
+      console.error(err);
+      stopStream();
+      setErrorMsg('録音を開始できませんでした。もう一度お試しください。');
+      return;
+    }
+
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+    };
+
+    recorder.onstop = async () => {
+      stopStream();
+      setRecState('processing');
+      const rawType = (recorder.mimeType || mimeType || 'audio/webm').split(';')[0];
+      const rawBlob = new Blob(chunksRef.current, { type: rawType });
+
+      let finalBlob = rawBlob;
+      let fileName = `アプリ内録音.${rawType.includes('mp4') ? 'm4a' : rawType.split('/')[1] || 'webm'}`;
+      try {
+        finalBlob = await convertToWav(rawBlob);
+        fileName = 'アプリ内録音.wav';
+      } catch (err) {
+        // 変換に失敗した場合は、録音したままの形式で送る
+        console.error('WAV変換に失敗しました:', err);
+      }
+
+      const file = new File([finalBlob], fileName, { type: finalBlob.type });
+      setAudioFile(file);
+      setRecordedUrl(URL.createObjectURL(finalBlob));
+      setRecState('recorded');
+    };
+
+    mediaRecorderRef.current = recorder;
+    recorder.start();
+    setRecSeconds(0);
+    setRecState('recording');
+
+    timerRef.current = setInterval(() => {
+      setRecSeconds((prev) => {
+        const next = prev + 1;
+        if (next >= MAX_RECORD_SECONDS && mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.stop();
+        }
+        return next;
+      });
+    }, 1000);
+  };
+
+  const handleStopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const handleRecordButton = () => {
+    if (recState === 'recording') {
+      handleStopRecording();
+    } else if (recState !== 'processing') {
+      handleStartRecording();
+    }
+  };
+
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files.length > 0) {
+      clearRecordedAudio();
       setAudioFile(e.target.files[0]);
     }
   };
@@ -78,6 +287,7 @@ export default function Home() {
     e.preventDefault();
     setDragActive(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      clearRecordedAudio();
       setAudioFile(e.dataTransfer.files[0]);
     }
   };
@@ -146,8 +356,17 @@ https://www.ksvox.net/
     e.preventDefault();
     setErrorMsg('');
 
+    if (recState === 'recording') {
+      setErrorMsg('録音中です。「録音を停止する」ボタンを押してから評価・分析を実行してください。');
+      return;
+    }
+    if (recState === 'processing') {
+      setErrorMsg('録音データを準備中です。数秒待ってからもう一度押してください。');
+      return;
+    }
+
     if (!audioFile) {
-      setErrorMsg('音声ファイルを選択してください。');
+      setErrorMsg('音声ファイルを選択するか、録音してください。');
       return;
     }
 
@@ -377,6 +596,59 @@ https://www.ksvox.net/
                 </svg>
                 <span>今すぐ録音する（スマホのみ）</span>
               </button>
+
+              {/* アプリ内録音ボタン(MediaRecorder方式。iPhone・Android・PC共通) */}
+              <button
+                type="button"
+                onClick={handleRecordButton}
+                disabled={loading || recState === 'processing'}
+                className={`w-full py-2.5 px-3 rounded-xl border text-xs sm:text-sm font-bold flex flex-col items-center justify-center transition disabled:opacity-60 disabled:cursor-not-allowed ${
+                  recState === 'recording'
+                    ? 'border-rose-400 bg-rose-950/70 hover:bg-rose-900/70 text-rose-200'
+                    : 'border-fuji/40 bg-indigo-950/60 hover:bg-indigo-900/70 text-fuji'
+                }`}
+              >
+                {recState === 'idle' && (
+                  <>
+                    <span>🎤 アプリ内で録音する</span>
+                    <span className="text-[10px] font-normal opacity-80 mt-0.5">※マイクの使用を許可してください</span>
+                  </>
+                )}
+                {recState === 'recording' && (
+                  <>
+                    <span className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse inline-block"></span>
+                      <span>⏹ 録音を停止する（{formatSeconds(recSeconds)}）</span>
+                    </span>
+                    <span className="text-[10px] font-normal opacity-80 mt-0.5">録音中…</span>
+                  </>
+                )}
+                {recState === 'processing' && <span>録音データを準備中…</span>}
+                {recState === 'recorded' && (
+                  <>
+                    <span>🎤 録音し直す</span>
+                    <span className="text-[10px] font-normal opacity-80 mt-0.5">
+                      ※この音声でよければ「評価・分析」ボタンを押してください
+                    </span>
+                  </>
+                )}
+              </button>
+
+              {recState === 'recorded' && recordedUrl && !showPlayer && (
+                <button
+                  type="button"
+                  onClick={() => setShowPlayer(true)}
+                  className="w-full py-2.5 rounded-xl border border-emerald-500/50 bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-300 text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition"
+                >
+                  ▶ 音声を確認する（{formatSeconds(recSeconds)}）
+                </button>
+              )}
+
+              {recState === 'recorded' && recordedUrl && showPlayer && (
+                <div className="bg-slate-900/70 border border-emerald-500/40 rounded-xl p-3">
+                  <audio controls src={recordedUrl} className="w-full" preload="metadata"></audio>
+                </div>
+              )}
             </div>
 
             {errorMsg && (
