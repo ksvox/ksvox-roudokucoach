@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Head from 'next/head';
+import KsBlocked from '../components/KsBlocked';
+import { gateProps } from '../lib/ksGate';
 
 const TASKS = [
   '夢十夜・第一夜',
@@ -132,7 +134,7 @@ async function convertToWav(blob) {
 // 巨大なBase64文字列をJSONに埋め込んで送ると、デプロイナウのWAFに誤検知でブロックされることがあるため、
 // 音声ファイルはmultipart/form-data形式でバイナリのまま直接送信する
 
-export default function Home() {
+function Home() {
   const [taskName, setTaskName] = useState(TASKS[0]);
   const [audioFile, setAudioFile] = useState(null);
   const [dragActive, setDragActive] = useState(false);
@@ -926,4 +928,14 @@ https://www.ksvox.net/
       </div>
     </>
   );
+}
+
+// ---- 門弟アプリ経由のみで開けるようにする入口 ----
+export async function getServerSideProps(ctx) {
+  return gateProps(ctx);
+}
+
+export default function Page({ ksAllowed }) {
+  if (!ksAllowed) return <KsBlocked appName="朗読AIコーチ" />;
+  return <Home />;
 }
