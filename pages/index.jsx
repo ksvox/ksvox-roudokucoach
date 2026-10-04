@@ -136,6 +136,47 @@ async function convertToWav(blob) {
 
 function Home() {
   const [taskName, setTaskName] = useState(TASKS[0]);
+  // 見本音声(門弟アプリから取得)
+  const [sample, setSample] = useState(null); // { title, author, image, url }
+  const [sampleLoading, setSampleLoading] = useState(false);
+  const [sampleError, setSampleError] = useState('');
+
+  // 課題を変えたら見本プレーヤーを閉じる
+  useEffect(() => {
+    setSample((prev) => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+    setSampleError('');
+  }, [taskName]);
+
+  const handleLoadSample = async () => {
+    if (sample) {
+      URL.revokeObjectURL(sample.url);
+      setSample(null);
+      return;
+    }
+    setSampleLoading(true);
+    setSampleError('');
+    try {
+      const res = await fetch('/api/sample', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ no: TASKS.indexOf(taskName) + 1 }),
+      });
+      let data = {};
+      try { data = await res.json(); } catch (e) { /* noop */ }
+      if (!res.ok) throw new Error(data.error || '見本音声を読み込めませんでした。');
+      const bin = atob(data.data);
+      const arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([arr], { type: data.mime || 'audio/mpeg' }));
+      setSample({ title: data.title, author: data.author, image: data.image, url });
+    } catch (e) {
+      setSampleError(e.message);
+    }
+    setSampleLoading(false);
+  };
   const [audioFile, setAudioFile] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -597,11 +638,43 @@ https://www.ksvox.net/
               </select>
             </div>
 
-            {/* ② 音声データ入力 */}
+            {/* ② 見本音声を聴く(任意) */}
             <div className="space-y-2">
               <label className="block text-xs sm:text-sm font-semibold text-fuji flex items-center space-x-2">
                 <span className="w-2 h-2 rounded-full bg-beni inline-block"></span>
-                <span>② 音声データ入力</span>
+                <span>② 見本音声を聴く（任意）</span>
+              </label>
+              <button
+                type="button"
+                onClick={handleLoadSample}
+                disabled={sampleLoading}
+                className="w-full py-2.5 px-3 rounded-xl border border-fuji/40 bg-indigo-950/60 hover:bg-indigo-900/70 text-fuji text-xs sm:text-sm font-bold transition disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {sampleLoading ? '見本音声を読み込み中…' : sample ? '▲ 見本音声を閉じる' : '🔈 この課題の朗読見本を聴く'}
+              </button>
+              {sampleError && <p className="text-xs text-rose-300">{sampleError}</p>}
+              {sample && (
+                <div className="flex gap-3 items-center bg-slate-900/80 border border-slate-600 rounded-xl p-3">
+                  {sample.image ? (
+                    <img src={sample.image} alt="" className="w-16 h-16 rounded-lg object-cover shrink-0 border border-slate-600" />
+                  ) : null}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-slate-100 mincho-font truncate">
+                      {sample.title}
+                      <span className="text-[11px] font-normal text-slate-400 ml-1">（{sample.author}）</span>
+                    </p>
+                    <p className="text-[11px] text-fuji/80 mb-1.5">朗読見本</p>
+                    <audio src={sample.url} controls autoPlay className="w-full h-9" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ③ 音声データ入力 */}
+            <div className="space-y-2">
+              <label className="block text-xs sm:text-sm font-semibold text-fuji flex items-center space-x-2">
+                <span className="w-2 h-2 rounded-full bg-beni inline-block"></span>
+                <span>③ 音声データ入力</span>
               </label>
 
               <div
@@ -749,7 +822,7 @@ https://www.ksvox.net/
                         d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
                       ></path>
                     </svg>
-                    <span className="mincho-font">③ 評価・分析を実行</span>
+                    <span className="mincho-font">④ 評価・分析を実行</span>
                   </>
                 )}
               </button>
@@ -848,29 +921,6 @@ https://www.ksvox.net/
                 </div>
               </div>
             )}
-          </div>
-        </section>
-
-        {/* 4. 見本音声プレイヤー */}
-        <section className="roman-card p-5 sm:p-6 rounded-2xl space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-700/80 pb-2">
-            <div className="flex items-center space-x-2 text-fuji font-bold text-sm mincho-font">
-              <svg className="w-5 h-5 text-beni" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
-                ></path>
-              </svg>
-              <span>見本を聞いてみよう（朗読見本音声）</span>
-            </div>
-            <span className="text-[10px] text-fuji/60 mincho-font">※スクロール可</span>
-          </div>
-
-          <div className="w-full bg-slate-950 rounded-xl p-2 border border-slate-700/80 max-h-[360px] overflow-y-auto custom-scrollbar">
-            <script src="https://elfsightcdn.com/platform.js" async></script>
-            <div className="elfsight-app-89f89e43-db18-4c20-8a65-beab1396cae2 w-full" data-elfsight-app-lazy></div>
           </div>
         </section>
 
