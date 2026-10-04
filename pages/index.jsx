@@ -587,7 +587,7 @@ https://www.ksvox.net/
               </h1>
 
               <span className="bg-beni text-white text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded border border-rose-300 shadow-md transform translate-y-[-4px]">
-                Ver2.0
+                Ver2.5
               </span>
             </div>
 
